@@ -144,15 +144,13 @@ model_dict = {
 
 class SupCR(nn.Module):
 
-    def __init__(self, name='resnet18'):
+    def __init__(self, name='resnet50'):
         super(SupCR, self).__init__()
         model_fun, dim_in = model_dict[name]
         self.encoder = model_fun()
 
     def forward(self, x):
         feature = self.encoder(x)
-        feature = F.normalize(feature, dim=1)
-
         return feature
 
 class Regression(nn.Module):

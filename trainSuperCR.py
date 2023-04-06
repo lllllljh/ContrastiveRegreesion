@@ -17,6 +17,7 @@ from torchvision import datasets
 from torchvision import transforms
 from datetime import datetime
 from network.CRlosses import SupCRLoss
+from network.losses import SupConLoss
 from network.Resnet import SupCR
 
 
@@ -32,10 +33,10 @@ class TwoCropTransform:
 class AverageMeter(object):
 
     def __init__(self):
-        self.sum = None
-        self.avg = None
-        self.val = None
-        self.count = None
+        self.sum = 0
+        self.avg = 0
+        self.val = 0
+        self.count = 0
         self.reset()
 
     def reset(self):
@@ -180,7 +181,12 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
                   'loss: {loss.val:.3f} loss_avg:({loss.avg:.3f})'.format(epoch, i + 1, len(train_loader), loss=losses))
             sys.stdout.flush()
 
+    for name, parms in model.named_parameters():
+        print('-->name:', name, '-->grad_requirs:', parms.requires_grad, '--weight', torch.mean(parms.data),
+              ' -->grad_value:', torch.mean(parms.grad))
+
     return losses.avg
+
 
 
 def validate(val_loader, model, criterion, epoch, opt):
@@ -203,7 +209,7 @@ def validate(val_loader, model, criterion, epoch, opt):
 
             if (i + 1) % opt.print_freq == 0:
                 print('Train: [{0}][{1}/{2}]\t'
-                      'val_loss: {loss.val:.3f} val_loss_avg:({loss.avg:.3f})'.format(epoch, i + 1, len(train_loader),
+                      'val_loss: {loss.val:.3f} val_loss_avg:({loss.avg:.3f})'.format(epoch, i + 1, len(val_loader),
                                                                                       loss=losses))
                 sys.stdout.flush()
 
@@ -220,16 +226,15 @@ def parser_opt():
     parser.add_argument('--print_freq', type=int, default=10)
     parser.add_argument('--save_freq', type=int, default=10)
     parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--workers', type=int, default=16)
 
-    parser.add_argument('--learning_rate', type=float, default=0.01)
+    parser.add_argument('--learning_rate', type=float, default=0.2)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=1e-4)
+    parser.add_argument('--weight_decay', type=float, default=1e-5)
     parser.add_argument('--momentum', type=float, default=0.9)
-    parser.add_argument('--temp', type=float, default=0.07)
-    parser.add_argument('--base_temp', type=float, default=0.07)
-    parser.add_argument('--trial', type=str, default='0')
+    parser.add_argument('--temp', type=float, default=2.0)
+    parser.add_argument('--base_temp', type=float, default=2.0)
 
     opt = parser.parse_args()
 
@@ -237,7 +242,7 @@ def parser_opt():
     train_dir = os.path.join(opt.save_path, train_name)
     if not os.path.exists(train_dir):
         os.makedirs(train_dir)
-    opt.model_path = os.path.join(train_dir, '{}_models'.format(train_name))
+    opt.model_path = train_dir
     opt.tb_path = os.path.join(train_dir, '{}_tensorboard'.format(train_name))
 
     return opt
@@ -262,8 +267,8 @@ if __name__ == '__main__':
         logger.log_value('val_loss', loss, epoch)
 
         if epoch % opt.save_freq == 0:
-            save_file = os.path.join(opt.save_path, 'epoch_{epoch}.pth'.format(epoch=epoch))
+            save_file = os.path.join(opt.model_path, 'epoch_{epoch}.pth'.format(epoch=epoch))
             save_model(model, optimizer, opt, epoch, save_file)
 
-    save_file = os.path.join(opt.save_path, 'last.pth')
+    save_file = os.path.join(opt.model_path, 'last.pth')
     save_model(model, optimizer, opt, opt.epochs, save_file)

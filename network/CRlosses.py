@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 
 
+
+
 class SupCRLoss(nn.Module):
     """Supervised Losses"""
 
@@ -15,27 +17,18 @@ class SupCRLoss(nn.Module):
 
         # generate mask and contrast feature
         device = torch.device('cuda')
-        if len(features.shape) > 3:
-            features = features.view(features.shape[0], features.shape[1], -1)
         batch_size = features.shape[0]
         labels = labels.contiguous().view(-1, 1)
-        if labels.shape[0] != batch_size:
-            raise ValueError('Num of labels does not match num of features')
-
         contrast_count = features.shape[1]
         contrast_feature = torch.cat(torch.unbind(features, dim=1), dim=0)
         anchor_feature = contrast_feature
         anchor_count = contrast_count
 
         # compute sim
-        anchor_feature_norm = torch.norm(anchor_feature, dim=1, keepdim=True)
-        contrast_feature_norm = torch.norm(contrast_feature, dim=1, keepdim=True)
-        dist = anchor_feature_norm ** 2 + (contrast_feature_norm ** 2).transpose(0, 1) - 2 * torch.mm(anchor_feature,
-                                                                                                      contrast_feature.transpose(
-                                                                                                          0, 1))
-        similarity = torch.exp(-dist)
+        dist = torch.cdist(anchor_feature, contrast_feature, p=2)
+
         logits = torch.div(
-            similarity,
+            -1 * dist,
             self.temperature)
         logits_exp = torch.exp(logits)
 
@@ -46,13 +39,13 @@ class SupCRLoss(nn.Module):
         # compute negative
         negative = torch.zeros(batch_size * contrast_count, batch_size * contrast_count, dtype=torch.float32).to(device)
         for i in range(batch_size * anchor_count):
-            temp = dis.clone()
+            temp = torch.zeros(batch_size * contrast_count, batch_size * contrast_count, dtype=torch.float32).to(device)
+            column = dis[:, i].clone()
             for j in range(batch_size * contrast_count):
-                column = temp[:, j]
-                k = temp[i, j]
-                column = torch.where(column >= k, 1, 0)
-                temp[:, j] = column
+                k = dis[i, j]
+                temp[:, j] = torch.where(column >= k, 1, 0)
             temp[:, i] = 0
+            temp[i] = 0
             negative[i] = torch.matmul(logits_exp[i], temp)
 
         # compute loss
@@ -62,7 +55,7 @@ class SupCRLoss(nn.Module):
             logits[i][i] = 0
         log_negative = torch.log(negative)
         log_prob = logits - log_negative
-        mean_log_prob_pos = log_prob.sum(1)/(batch_size * anchor_count - 1)
+        mean_log_prob_pos = log_prob.sum(1) / (batch_size * anchor_count - 1)
         loss = - (self.temperature / self.base_temperature) * mean_log_prob_pos
         loss = loss.view(anchor_count, batch_size).mean()
 
