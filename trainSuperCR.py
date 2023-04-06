@@ -13,11 +13,9 @@ from PIL import Image
 from torch import optim
 from torch.backends import cudnn
 from torch.utils.data import Dataset
-from torchvision import datasets
 from torchvision import transforms
 from datetime import datetime
-from network.CRlosses import SupCRLoss
-from network.losses import SupConLoss
+from network.SuperCRlosses import SupCRLoss
 from network.Resnet import SupCR
 
 
@@ -239,6 +237,7 @@ def parser_opt():
     opt = parser.parse_args()
 
     train_name = datetime.now(tz=pytz.timezone('Asia/Shanghai')).strftime("%Y%m%d_%H%M%S")
+    train_name = train_name + "Encoder"
     train_dir = os.path.join(opt.save_path, train_name)
     if not os.path.exists(train_dir):
         os.makedirs(train_dir)

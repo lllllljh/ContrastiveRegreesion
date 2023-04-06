@@ -144,9 +144,9 @@ model_dict = {
 
 class SupCR(nn.Module):
 
-    def __init__(self, name='resnet50'):
+    def __init__(self, name='resnet18'):
         super(SupCR, self).__init__()
-        model_fun, dim_in = model_dict[name]
+        model_fun, _ = model_dict[name]
         self.encoder = model_fun()
 
     def forward(self, x):
@@ -155,19 +155,24 @@ class SupCR(nn.Module):
 
 class Regression(nn.Module):
 
-    def __int__(self, input_size, output_size=1):
+    def __init__(self, output_size=1, name='resnet18'):
         super(Regression, self).__init__()
+        _, input_size = model_dict[name]
         self.input_size = input_size
         self.output_size = output_size
         self.linear1 = nn.Linear(self.input_size, self.input_size)
         self.linear2 = nn.Linear(self.input_size, self.output_size)
         self.relu = nn.ReLU(inplace=True)
+        self.dropout = nn.Dropout(p=0.2)
 
     def forward(self, x):
-        age = self.linear1(x)
-        age = self.relu(age)
-        age = self.linear1(age)
-        age = self.relu(age)
-        age = self.linear2(age)
+        x = F.normalize(x, dim=1)
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.linear1(x)
+        x = self.relu(x)
+        x = self.dropout(x)
+        x = self.linear2(x)
 
-        return age
+        return x
