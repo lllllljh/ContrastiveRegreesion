@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 
 
-
-
 class SupCRLoss(nn.Module):
     """Supervised Losses"""
 

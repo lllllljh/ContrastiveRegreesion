@@ -53,7 +53,7 @@ class MyDataset(Dataset):
         image_name = self.image_file[index].split('.')[0]
         raw_label = self.label_info.loc[self.label_info['ID'].astype(str) == image_name]
         labels = torch.tensor(raw_label['Boneage'].values, dtype=torch.float32)
-        sexs = torch.tensor(raw_label['Boneage'].values, dtype=torch.bool)
+        sexs = torch.tensor(raw_label['Male'].values, dtype=torch.float32)
         image_name = os.path.join(self.data_dir, self.image_file[index])
         images = Image.open(image_name).convert('RGB')
         if self.transform is not None:
@@ -75,7 +75,7 @@ def set_model(opt):
     criterion = torch.nn.MSELoss()
 
     if torch.cuda.is_available():
-        model.cuda()
+        model = model.cuda()
         regression = regression.cuda()
         criterion = criterion.cuda()
         cudnn.benchmark = True
@@ -140,11 +140,12 @@ def set_optimizer(opt, model):
     return optimizer
 
 
-def save_model(model, optimizer, opt, epoch, save_file):
+def save_model(model, regression, optimizer, opt, epoch, save_file):
     print('Saving...')
     state = {
         'opt': opt,
         'model': model.state_dict(),
+        'regression': regression.state_dict(),
         'optimizer': optimizer.state_dict(),
         'epoch': epoch,
     }
@@ -164,14 +165,15 @@ def train(train_loader, model, regression, criterion, optimizer, epoch, opt):
     losses = AverageMeter()
     acces = AverageMeter()
 
-    for i, (images, labels, sexs) in enumerate(train_loader):
+    for i, (images, labels, sexes) in enumerate(train_loader):
         if torch.cuda.is_available():
             images = images.cuda(non_blocking=True)
+            sexes = sexes.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
         batch_size = labels.shape[0]
         with torch.no_grad():
             features = model(images)
-        out = regression(features.detach())
+        out = regression(features.detach(), sexes)
         loss = criterion(out, labels)
         losses.update(loss.item(), batch_size)
         acces.update(accuracy(out, labels), batch_size)
@@ -182,7 +184,8 @@ def train(train_loader, model, regression, criterion, optimizer, epoch, opt):
         if (i + 1) % opt.print_freq == 0:
             print('Train: [{0}][{1}/{2}]\t'
                   'loss: {loss.val:.3f} loss_avg:({loss.avg:.3f}) \t'
-                  'acc: {acc.val:.3f} acc_avg:({acc.avg:.3f}) \t'.format(epoch, i + 1, len(train_loader), loss=losses, acc=acces))
+                  'acc: {acc.val:.3f} acc_avg:({acc.avg:.3f}) \t'.format(epoch, i + 1, len(train_loader), loss=losses,
+                                                                         acc=acces))
             sys.stdout.flush()
 
     return losses.avg, acces.avg
@@ -196,13 +199,14 @@ def validate(val_loader, model, regression, criterion, epoch, opt):
     acces = AverageMeter()
 
     with torch.no_grad():
-        for i, (images, labels, sexs) in enumerate(val_loader):
+        for i, (images, labels, sexes) in enumerate(val_loader):
             if torch.cuda.is_available():
                 images = images.cuda(non_blocking=True)
+                sexes = sexes.cuda(non_blocking=True)
                 labels = labels.cuda(non_blocking=True)
             batch_size = labels.shape[0]
             features = model(images)
-            out = regression(features.detach())
+            out = regression(features.detach(), sexes)
             loss = criterion(out, labels)
             losses.update(loss.item(), batch_size)
             acces.update(accuracy(out, labels), batch_size)
@@ -210,7 +214,8 @@ def validate(val_loader, model, regression, criterion, epoch, opt):
             if (i + 1) % opt.print_freq == 0:
                 print('Train: [{0}][{1}/{2}]\t'
                       'val_loss: {loss.val:.3f} val_loss_avg:({loss.avg:.3f})\t'
-                      'acc_loss: {acc.val:.3f} val_acc_avg:({acc.avg:.3f})'.format(epoch, i + 1, len(val_loader), loss=losses, acc=acces))
+                      'val_acc: {acc.val:.3f} val_acc_avg:({acc.avg:.3f})'.format(epoch, i + 1, len(val_loader),
+                                                                              loss=losses, acc=acces))
                 sys.stdout.flush()
 
     return losses.avg, acces.avg
@@ -230,12 +235,10 @@ def parser_opt():
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--workers', type=int, default=8)
 
-    parser.add_argument('--learning_rate', type=float, default=0.0001)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=0)
+    parser.add_argument('--weight_decay', type=float, default=0.01)
     parser.add_argument('--momentum', type=float, default=0.9)
-    parser.add_argument('--temp', type=float, default=2.0)
-    parser.add_argument('--base_temp', type=float, default=2.0)
 
     opt = parser.parse_args()
 
@@ -274,7 +277,7 @@ if __name__ == '__main__':
 
         if epoch % opt.save_freq == 0:
             save_file = os.path.join(opt.model_path, 'epoch_{epoch}.pth'.format(epoch=epoch))
-            save_model(model, optimizer, opt, epoch, save_file)
+            save_model(model, regression, optimizer, opt, epoch, save_file)
 
     save_file = os.path.join(opt.model_path, 'last.pth')
-    save_model(model, optimizer, opt, opt.epochs, save_file)
+    save_model(model, regression, optimizer, opt, opt.epochs, save_file)
