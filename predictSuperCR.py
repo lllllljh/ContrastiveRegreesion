@@ -106,6 +106,8 @@ def accuracy(output, labels):
 
 
 def test(test_loader, model, regression, log):
+    model.eval()
+    regression.eval()
     acces = AverageMeter()
     with torch.no_grad():
         for i, (images, labels, sexes, names) in enumerate(test_loader):
@@ -133,7 +135,7 @@ def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
-    parser.add_argument('--weight', type=str, default='./weight/SuperCRPredict.pth')
+    parser.add_argument('--weight', type=str, default='./weight/last.pth')
     parser.add_argument('--mean', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
     parser.add_argument('--size', type=int, default=256)

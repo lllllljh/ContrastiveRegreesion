@@ -231,13 +231,13 @@ def parser_opt():
 
     parser.add_argument('--print_freq', type=int, default=1)
     parser.add_argument('--save_freq', type=int, default=10)
-    parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--workers', type=int, default=8)
 
     parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=0.01)
+    parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--momentum', type=float, default=0.9)
 
     opt = parser.parse_args()

@@ -168,14 +168,14 @@ class Regression(nn.Module):
         self.linear3 = nn.Linear(self.input_size, self.output_size)
         self.linear4 = nn.Linear(self.sex_input_size, self.sex_output_size)
         self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=0.3)
 
     def forward(self, x, sex):
         sex = self.linear4(sex)
         sex = self.relu(sex)
         sex = self.dropout(sex)
-        x = torch.cat([x, sex], dim=1)
         x = F.normalize(x, dim=1)
+        x = torch.cat([x, sex], dim=1)
         x = self.linear1(x)
         x = self.relu(x)
         x = self.dropout(x)
