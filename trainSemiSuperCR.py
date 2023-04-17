@@ -15,8 +15,9 @@ from torch.backends import cudnn
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
+
 from network.SuperCRlosses import SupCRLoss
-from network.Resnet import CR
+from network.Resnet import CR, Linear
 
 
 class TwoCropTransform:
@@ -50,7 +51,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-class MyDataset(Dataset):
+class MyDataset1(Dataset):
     def __init__(self, data_dir, info_csv, transform=None):
         label_info = pd.read_csv(info_csv)
         image_file = os.listdir(data_dir)
@@ -74,16 +75,50 @@ class MyDataset(Dataset):
         return len(self.image_file)
 
 
+class MyDataset2(Dataset):
+    def __init__(self, data_dir, transform=None):
+        image_file = os.listdir(data_dir)
+        self.data_dir = data_dir
+        self.image_file = image_file
+        self.transform = transform
+
+    def __getitem__(self, index):
+        image_name = os.path.join(self.data_dir, self.image_file[index])
+        images = Image.open(image_name).convert('RGB')
+        if self.transform is not None:
+            images = self.transform(images)
+
+        return images
+
+    def __len__(self):
+        return len(self.image_file)
+
+
+class MyDataset3(Dataset):
+    def __init__(self, data, label, transform=None):
+        self.data = data
+        self.label = label
+        self.transform = transform
+
+    def __getitem__(self, index):
+        return self.data[index], self.label[index]
+
+    def __len__(self):
+        return len(self.data)
+
+
 def set_model(opt):
     model = CR()
+    liner = Linear()
     criterion = SupCRLoss(temperature=opt.temp, base_temperature=opt.base_temp)
 
     if torch.cuda.is_available():
         model = model.cuda()
+        liner = liner.cuda()
         criterion = criterion.cuda()
         cudnn.benchmark = True
 
-    return model, criterion
+    return model, criterion, liner
 
 
 def set_data_loader(opt):
@@ -109,21 +144,29 @@ def set_data_loader(opt):
     train_info_path = os.path.join(opt.dataset_path, 'boneage_train.csv')
     val_data_path = os.path.join(opt.dataset_path, 'val')
     val_info_path = os.path.join(opt.dataset_path, 'boneage_val.csv')
+    unlabeled_data_path = os.path.join(opt.dataset_path, 'unlabelled')
 
-    train_dataset = MyDataset(
+    train_dataset = MyDataset1(
         data_dir=train_data_path, info_csv=train_info_path, transform=TwoCropTransform(train_transform)
     )
     train_loader = dataloader.DataLoader(
         train_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, pin_memory=True
     )
-    val_dataset = MyDataset(
+    val_dataset = MyDataset1(
         data_dir=val_data_path, info_csv=val_info_path, transform=TwoCropTransform(val_transform)
     )
     val_loader = dataloader.DataLoader(
         val_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, pin_memory=True
     )
+    unlabelled_dataset = MyDataset2(
+        data_dir=unlabeled_data_path, transform=TwoCropTransform(train_transform)
+    )
+    unlabelled_loader = dataloader.DataLoader(
+        unlabelled_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, pin_memory=True
+    )
 
-    return train_loader, val_loader
+
+    return train_loader, val_loader, unlabelled_loader
 
 
 def adjust_learning_rate(opt, optimizer, epoch):
@@ -155,8 +198,9 @@ def save_model(model, optimizer, opt, epoch, save_file):
     del state
 
 
-def train(train_loader, model, criterion, optimizer, epoch, opt):
+def train(train_loader, unlabeled_loader, model, liner, criterion, optimizer, epoch, opt):
     model.train()
+    liner.train()
     losses = AverageMeter()
 
     for i, (images, labels) in enumerate(train_loader):
@@ -175,17 +219,31 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
         optimizer.step()
 
         if (i + 1) % opt.print_freq == 0:
-            print('Train: [{0}][{1}/{2}]\t'
+            print('Train(label): [{0}][{1}/{2}]\t'
                   'loss: {loss.val:.3f} loss_avg:({loss.avg:.3f})'.format(epoch, i + 1, len(train_loader), loss=losses))
             sys.stdout.flush()
+
+    model.eval()
+    for i, (images, _ ) in enumerate(unlabeled_loader):
+        images = torch.cat([images[0], images[1]], dim=0)
+        if torch.cuda.is_available():
+            images = images.cuda(non_blocking=True)
+
+        features = model(images)
+        f1, f2 = torch.split(features, [batch_size, batch_size], dim=0)
+        features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
+
+        losses.update(loss.item(), batch_size)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
 
     # for name, parms in model.named_parameters():
     #     print('-->name:', name, '-->grad_requirs:', parms.requires_grad, '--weight', torch.mean(parms.data),
     #           ' -->grad_value:', torch.mean(parms.grad))
 
     return losses.avg
-
-
 
 def validate(val_loader, model, criterion, epoch, opt):
 
@@ -213,6 +271,7 @@ def validate(val_loader, model, criterion, epoch, opt):
 
     return losses.avg
 
+
 def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
@@ -227,7 +286,7 @@ def parser_opt():
     parser.add_argument('--batch_size', type=int, default=16)
     parser.add_argument('--workers', type=int, default=8)
 
-    parser.add_argument('--learning_rate', type=float, default=0.0001)
+    parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--momentum', type=float, default=0.9)
@@ -250,19 +309,23 @@ def parser_opt():
 if __name__ == '__main__':
 
     opt = parser_opt()
-    train_loader, val_loader = set_data_loader(opt)
-    model, criterion = set_model(opt)
+    train_loader, val_loader, unlabelled_loader = set_data_loader(opt)
+    model, criterion1, criterion2 = set_model(opt)
     optimizer = set_optimizer(opt, model)
     logger = tensorboard_logger.Logger(logdir=opt.tb_path, flush_secs=2)
 
     for epoch in range(1, opt.epochs + 1):
         adjust_learning_rate(opt, optimizer, epoch)
 
-        loss = train(train_loader, model, criterion, optimizer, epoch, opt)
+        loss1 = train1(train_loader, model, criterion1, optimizer, epoch, opt)
+        loss2 = train2(unlabelled_loader, model, criterion2, optimizer, epoch, opt)
         logger.log_value('learning_rate', optimizer.param_groups[0]['lr'], epoch)
-        logger.log_value('train_loss', loss, epoch)
+        logger.log_value('train_loss(label)', loss1, epoch)
+        logger.log_value('train_loss(unlabelled)', loss2, epoch)
+        logger.log_value('train_loss(all)', loss1 + loss2, epoch)
+        print('Train(all): [{0}]\t loss: {1}'.format(epoch, loss1+loss2))
 
-        loss = validate(val_loader, model, criterion, epoch, opt)
+        loss = validate(val_loader, model, criterion1, epoch, opt)
         logger.log_value('val_loss', loss, epoch)
 
         if epoch % opt.save_freq == 0:

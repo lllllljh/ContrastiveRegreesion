@@ -11,7 +11,7 @@ class SupCRLoss(nn.Module):
         self.temperature = temperature
         self.base_temperature = base_temperature
 
-    def forward(self, features, labels=None, mask=None):
+    def forward(self, features, labels=None):
 
         # generate mask and contrast feature
         device = torch.device('cuda')

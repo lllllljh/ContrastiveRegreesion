@@ -142,10 +142,10 @@ model_dict = {
 }
 
 
-class SupCR(nn.Module):
+class CR(nn.Module):
 
     def __init__(self, name='resnet18'):
-        super(SupCR, self).__init__()
+        super(CR, self).__init__()
         model_fun, _ = model_dict[name]
         self.encoder = model_fun()
 
@@ -156,7 +156,7 @@ class SupCR(nn.Module):
 
 class Regression(nn.Module):
 
-    def __init__(self, sex_input_size=1, sex_output_size=4, output_size=1, name='resnet18'):
+    def __init__(self, sex_input_size=1, sex_output_size=8, output_size=1, name='resnet18'):
         super(Regression, self).__init__()
         _, input_size = model_dict[name]
         self.input_size = input_size
@@ -168,14 +168,16 @@ class Regression(nn.Module):
         self.linear3 = nn.Linear(self.input_size, self.output_size)
         self.linear4 = nn.Linear(self.sex_input_size, self.sex_output_size)
         self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(p=0.3)
+        self.dropout = nn.Dropout(p=0.2)
 
     def forward(self, x, sex):
         sex = self.linear4(sex)
         sex = self.relu(sex)
         sex = self.dropout(sex)
-        x = F.normalize(x, dim=1)
+        print(x.shape)
+        print(sex.shape)
         x = torch.cat([x, sex], dim=1)
+        x = F.normalize(x, dim=1)
         x = self.linear1(x)
         x = self.relu(x)
         x = self.dropout(x)

@@ -3,7 +3,7 @@ from PIL import Image
 import numpy as np
 import tqdm
 
-path = r"D:\BoneAge\DataSet\all"
+path = r"D:\BoneAge\CR\dataset\unlabelled"
 img_channels = 3
 img_names = os.listdir(path)
 cumulative_mean = np.zeros(img_channels)

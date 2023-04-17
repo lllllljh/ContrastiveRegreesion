@@ -1,10 +1,11 @@
 import os
-path = r"D:\BoneAge\CR\dataset\unlabeled3"
+path = r"D:\BoneAge\CR\dataset\unlabelled"
 fileList = os.listdir(path)
-i = 34000
+i = 20001
 for file in fileList:
     old = os.path.join(path, file)
-    new = os.path.join(path, str(i)+'.png')
+    j = str(i).zfill(5)
+    new = os.path.join(path, j+'.png')
     i = i + 1
     os.rename(old, new)
     print(old, '======>', new)
