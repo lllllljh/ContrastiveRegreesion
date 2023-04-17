@@ -251,7 +251,7 @@ def train(train_loader, unlabelled_loader, unlabelled_dataset, model, regression
         else:
             unlabelled_out = torch.cat([unlabelled_out, out], dim=0)
 
-    unlabelled_dataset.set_label(unlabelled_out)
+    unlabelled_dataset.set_label(unlabelled_out.cpu())
     pseudo_dataset = unlabelled_dataset
     pseudo_loader = dataloader.DataLoader(
         pseudo_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0, pin_memory=False

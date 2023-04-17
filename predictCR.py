@@ -87,8 +87,8 @@ def set_data_loader(opt):
         normalize
     ])
 
-    test_data_path = os.path.join(opt.dataset_path, 'unlabelled')
-    test_info_path = os.path.join(opt.dataset_path, 'unlabelled.csv')
+    test_data_path = os.path.join(opt.dataset_path, 'test')
+    test_info_path = os.path.join(opt.dataset_path, 'test.csv')
 
     test_dataset = MyDataset(
         data_dir=test_data_path, info_csv=test_info_path, transform=test_transform
@@ -141,7 +141,7 @@ def parser_opt():
     parser.add_argument('--size', type=int, default=256)
 
     parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--test_num', type=int, default=6212)
+    parser.add_argument('--test_num', type=int, default=500)
     parser.add_argument('--workers', type=int, default=4)
 
     opt = parser.parse_args()
