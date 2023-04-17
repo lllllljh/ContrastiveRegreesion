@@ -174,8 +174,6 @@ class Regression(nn.Module):
         sex = self.linear4(sex)
         sex = self.relu(sex)
         sex = self.dropout(sex)
-        print(x.shape)
-        print(sex.shape)
         x = torch.cat([x, sex], dim=1)
         x = F.normalize(x, dim=1)
         x = self.linear1(x)
