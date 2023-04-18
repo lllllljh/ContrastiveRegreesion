@@ -16,7 +16,6 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
 from network.Resnet import CR, Regression
-import torch.nn.functional as F
 
 
 class AverageMeter(object):
@@ -75,11 +74,8 @@ class MyDataset2(Dataset):
         self.info = info
         self.transform = transform
         self.label = label
-        self.pseudo_label_index = []
 
     def __getitem__(self, index):
-        if self.label is not None and index in self.pseudo_label_index:
-            return None, 0, 0
         image_name = self.image_file[index].split('.')[0]
         raw = self.info.loc[self.info['ID'].astype(str) == image_name]
         sexs = torch.tensor(raw['Male'].values, dtype=torch.float32)
@@ -98,10 +94,35 @@ class MyDataset2(Dataset):
     def set_label(self, label):
         self.label = None
         self.label = label
-        self.pseudo_label_index = []
-        for i, l in enumerate(self.label):
-            if l != -1:
-                self.pseudo_label_index.append(i)
+
+
+class MyDataset3(Dataset):
+    def __init__(self, data_dir, info_csv, label, count, transform=None):
+        self.info = pd.read_csv(info_csv)
+        self.data_dir = data_dir
+        self.image_file = os.listdir(data_dir)
+        self.label = label
+        self.count = int(count)
+        self.transform = transform
+        self.pseudo_index = []
+        idx = 0
+        for i in self.label:
+            if i != -1:
+                self.pseudo_index.append(idx)
+            idx += 1
+
+    def __getitem__(self, index):
+        image_name = self.image_file[self.pseudo_index[index]].split('.')[0]
+        raw = self.info.loc[self.info['ID'].astype(str) == image_name]
+        sexs = torch.tensor(raw['Male'].values, dtype=torch.float32)
+        image_name = os.path.join(self.data_dir, self.image_file[self.pseudo_index[index]])
+        images = Image.open(image_name).convert('RGB')
+        if self.transform is not None:
+            images = self.transform(images)
+        return images, sexs, self.label[self.pseudo_index[index]]
+
+    def __len__(self):
+        return self.count
 
 
 def set_model(opt):
@@ -151,11 +172,11 @@ def set_data_loader(opt):
         normalize2
     ])
 
-    train_data_path = os.path.join(opt.dataset_path, 't')
+    train_data_path = os.path.join(opt.dataset_path, 'train')
     train_info_path = os.path.join(opt.dataset_path, 'boneage_train.csv')
     val_data_path = os.path.join(opt.dataset_path, 'val')
     val_info_path = os.path.join(opt.dataset_path, 'boneage_val.csv')
-    unlabelled_data_path = os.path.join(opt.dataset_path, 'u')
+    unlabelled_data_path = os.path.join(opt.dataset_path, 'unlabelled')
     unlabelled_info_path = os.path.join(opt.dataset_path, 'unlabelled.csv')
 
     train_dataset = MyDataset1(
@@ -176,7 +197,28 @@ def set_data_loader(opt):
     unlabelled_loader = dataloader.DataLoader(
         unlabelled_dataset, batch_size=opt.batch_size, shuffle=False, num_workers=opt.workers, pin_memory=True
     )
-    return train_loader, val_loader, unlabelled_loader, unlabelled_dataset
+    return train_loader, val_loader, unlabelled_loader
+
+
+def set_pseudo_loader(opt, pseudo_labels, count):
+    unlabelled_data_path = os.path.join(opt.dataset_path, 'unlabelled')
+    unlabelled_info_path = os.path.join(opt.dataset_path, 'unlabelled.csv')
+    normalize = transforms.Normalize(mean=eval(opt.mean2), std=eval(opt.std2))
+    pseudo_transform = transforms.Compose([
+        transforms.Resize((300, 400)),
+        transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.ToTensor(),
+        normalize
+    ])
+    pseudo_dataset = MyDataset3(unlabelled_data_path, unlabelled_info_path, pseudo_labels, count, pseudo_transform)
+    pseudo_loader = dataloader.DataLoader(
+        pseudo_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, pin_memory=True
+    )
+
+    return pseudo_loader
 
 
 def adjust_learning_rate(opt, optimizer, epoch):
@@ -215,7 +257,7 @@ def accuracy(output, labels):
         return mae.mean()
 
 
-def train(train_loader, unlabelled_loader, unlabelled_dataset, model, regression, criterion, optimizer, epoch, opt):
+def train(train_loader, unlabelled_loader, model, regression, criterion, optimizer, epoch, opt):
     model.eval()
     regression.train()
     losses1 = AverageMeter()
@@ -254,30 +296,33 @@ def train(train_loader, unlabelled_loader, unlabelled_dataset, model, regression
             sexes = sexes.cuda(non_blocking=True)
         with torch.no_grad():
             features = model(images)
-            out = regression(features, sexes)
-        out = out.detach()
+            regression.train()
+            outputs = []
+            for j in range(opt.drop_iterations):
+                out = regression(features, sexes)
+                outputs.append(out)
+            regression.eval()
+            outputs = torch.stack(outputs)
+            mean_outputs = torch.mean(outputs, dim=0)
+            var_outputs = torch.var(outputs, dim=0, unbiased=False)
+        out = mean_outputs.detach()
+        var = var_outputs.detach()
         if i == 0:
             unlabelled_out = out
+            unlabelled_var = var
         else:
             unlabelled_out = torch.cat([unlabelled_out, out], dim=0)
-    unlabelled_max_probs = torch.max(F.softmax(unlabelled_out, dim=1), dim=1)[0]
-    unlabelled_max_probs = unlabelled_max_probs.view(-1, 1)
-    mask = (unlabelled_max_probs > opt.threshold).float()
+            unlabelled_var = torch.cat([unlabelled_var, var], dim=0)
+
+    mask = (unlabelled_var < opt.threshold).float()
     count = torch.sum(mask)
     print("pseudo label selected number:", count.item())
     pseudo_labels = unlabelled_out * mask
     pseudo_labels[pseudo_labels == 0] = -1
-
-
-    unlabelled_dataset.set_label(pseudo_labels.cpu())
-    pseudo_dataset = unlabelled_dataset
-    pseudo_loader = dataloader.DataLoader(
-        pseudo_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0, pin_memory=False
-    )
+    pseudo_labels = pseudo_labels.cpu().numpy()
+    pseudo_loader = set_pseudo_loader(opt, pseudo_labels, count)
 
     for i, (images, sexes, labels) in enumerate(pseudo_loader):
-        if images is None:
-            continue
         if torch.cuda.is_available():
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
@@ -315,7 +360,7 @@ def validate(val_loader, model, regression, criterion, epoch, opt):
             if torch.cuda.is_available():
                 images = images.cuda(non_blocking=True)
                 labels = labels.cuda(non_blocking=True)
-                sexes = labels.cuda(non_blocking=True)
+                sexes = sexes.cuda(non_blocking=True)
             batch_size = labels.shape[0]
             features = model(images)
             out = regression(features.detach(), sexes)
@@ -349,7 +394,8 @@ def parser_opt():
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--batch_size', type=int, default=128)
     parser.add_argument('--workers', type=int, default=8)
-    parser.add_argument('--threshold', type=float, default=0.9)
+    parser.add_argument('--threshold', type=float, default=1)
+    parser.add_argument('--drop_iterations', type=int, default=5)
 
     parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
@@ -372,7 +418,7 @@ def parser_opt():
 if __name__ == '__main__':
 
     opt = parser_opt()
-    train_loader, val_loader, unlabelled_loader, unlabelled_dataset = set_data_loader(opt)
+    train_loader, val_loader, unlabelled_loader = set_data_loader(opt)
     model, regression, criterion = set_model(opt)
     optimizer = set_optimizer(opt, regression)
     logger = tensorboard_logger.Logger(logdir=opt.tb_path, flush_secs=2)
@@ -380,7 +426,7 @@ if __name__ == '__main__':
     for epoch in range(1, opt.epochs + 1):
         adjust_learning_rate(opt, optimizer, epoch)
 
-        loss1, acc1, loss2, acc2 = train(train_loader, unlabelled_loader, unlabelled_dataset, model, regression,
+        loss1, acc1, loss2, acc2 = train(train_loader, unlabelled_loader, model, regression,
                                          criterion, optimizer, epoch, opt)
         logger.log_value('learning_rate', optimizer.param_groups[0]['lr'], epoch)
         logger.log_value('train_loss', loss1, epoch)
