@@ -15,8 +15,14 @@ from torch.backends import cudnn
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
-from network.SuperCRlosses import SupCRLoss
+
+from network.InceptionResNetV2 import InceptionResNetV2
+from network.Xception import Xception
+from network.ResNet50 import ResNet50
+from network.ResNet34 import ResNet34
+from network.ResNet18 import ResNet18
 from network.Resnet import CR
+from network.SuperCRlosses import SupCRLoss
 
 
 class TwoCropTransform:
@@ -75,7 +81,7 @@ class MyDataset(Dataset):
 
 
 def set_model(opt):
-    model = CR()
+    model = ResNet18()
     criterion = SupCRLoss(temperature=opt.temp, base_temperature=opt.base_temp)
 
     if torch.cuda.is_available():
@@ -90,7 +96,7 @@ def set_data_loader(opt):
     normalize = transforms.Normalize(mean=eval(opt.mean), std=eval(opt.std))
 
     train_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
@@ -100,7 +106,7 @@ def set_data_loader(opt):
     ])
 
     val_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((500, 500)),
         transforms.ToTensor(),
         normalize
     ])
@@ -186,9 +192,7 @@ def train(train_loader, model, criterion, optimizer, epoch, opt):
     return losses.avg
 
 
-
 def validate(val_loader, model, criterion, epoch, opt):
-
     model.eval()
     losses = AverageMeter()
 
@@ -213,21 +217,22 @@ def validate(val_loader, model, criterion, epoch, opt):
 
     return losses.avg
 
+
 def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
     parser.add_argument('--mean', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
-    parser.add_argument('--size', type=int, default=256)
+    parser.add_argument('--size', type=int, default=400)
 
-    parser.add_argument('--print_freq', type=int, default=10)
+    parser.add_argument('--print_freq', type=int, default=1)
     parser.add_argument('--save_freq', type=int, default=10)
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--epochs', type=int, default=300)
+    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--workers', type=int, default=14)
 
-    parser.add_argument('--learning_rate', type=float, default=0.0001)
+    parser.add_argument('--learning_rate', type=float, default=0.1)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--momentum', type=float, default=0.9)
@@ -255,6 +260,7 @@ if __name__ == '__main__':
     optimizer = set_optimizer(opt, model)
     logger = tensorboard_logger.Logger(logdir=opt.tb_path, flush_secs=2)
 
+    min_loss = 50
     for epoch in range(1, opt.epochs + 1):
         adjust_learning_rate(opt, optimizer, epoch)
 
@@ -265,8 +271,9 @@ if __name__ == '__main__':
         loss = validate(val_loader, model, criterion, epoch, opt)
         logger.log_value('val_loss', loss, epoch)
 
-        if epoch % opt.save_freq == 0:
-            save_file = os.path.join(opt.model_path, 'epoch_{epoch}.pth'.format(epoch=epoch))
+        if loss < min_loss:
+            min_loss = loss
+            save_file = os.path.join(opt.model_path, 'best.pth'.format(epoch=epoch))
             save_model(model, optimizer, opt, epoch, save_file)
 
     save_file = os.path.join(opt.model_path, 'last.pth')
