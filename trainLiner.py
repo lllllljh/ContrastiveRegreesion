@@ -16,17 +16,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
 
-from network.ResNet18 import ResNet18
-from network.SuperCRlosses import SupCRLoss
-
-
-class TwoCropTransform:
-
-    def __init__(self, transform):
-        self.transform = transform
-
-    def __call__(self, x):
-        return [self.transform(x), self.transform(x)]
+from network.ResNet18Liner import ResNet18Liner
 
 
 class AverageMeter(object):
@@ -64,20 +54,21 @@ class MyDataset(Dataset):
         image_name = self.image_file[index].split('.')[0]
         raw_label = self.label_info.loc[self.label_info['ID'].astype(str) == image_name]
         labels = torch.tensor(raw_label['Boneage'].values, dtype=torch.float32)
+        sexs = torch.tensor(raw_label['Male'].values, dtype=torch.float32)
         image_name = os.path.join(self.data_dir, self.image_file[index])
         images = Image.open(image_name).convert('RGB')
         if self.transform is not None:
             images = self.transform(images)
 
-        return images, labels
+        return images, labels, sexs
 
     def __len__(self):
         return len(self.image_file)
 
 
-def set_model(opt):
-    model = ResNet18()
-    criterion = SupCRLoss(temperature=opt.temp, base_temperature=opt.base_temp)
+def set_model():
+    model = ResNet18Liner()
+    criterion = torch.nn.MSELoss()
 
     if torch.cuda.is_available():
         model = model.cuda()
@@ -112,13 +103,13 @@ def set_data_loader(opt):
     val_info_path = os.path.join(opt.dataset_path, 'boneage_val.csv')
 
     train_dataset = MyDataset(
-        data_dir=train_data_path, info_csv=train_info_path, transform=TwoCropTransform(train_transform)
+        data_dir=train_data_path, info_csv=train_info_path, transform=train_transform
     )
     train_loader = dataloader.DataLoader(
         train_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, pin_memory=True
     )
     val_dataset = MyDataset(
-        data_dir=val_data_path, info_csv=val_info_path, transform=TwoCropTransform(val_transform)
+        data_dir=val_data_path, info_csv=val_info_path, transform=val_transform
     )
     val_loader = dataloader.DataLoader(
         val_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=opt.workers, pin_memory=True
@@ -156,61 +147,70 @@ def save_model(model, optimizer, opt, epoch, save_file):
     del state
 
 
+def accuracy(output, labels):
+    with torch.no_grad():
+        mae = torch.abs(output - labels)
+        return mae.mean()
+
+
 def train(train_loader, model, criterion, optimizer, epoch, opt):
     model.train()
     losses = AverageMeter()
+    acces = AverageMeter()
 
-    for i, (images, labels) in enumerate(train_loader):
-        images = torch.cat([images[0], images[1]], dim=0)
+    for i, (images, labels, sexes) in enumerate(train_loader):
         if torch.cuda.is_available():
             images = images.cuda(non_blocking=True)
             labels = labels.cuda(non_blocking=True)
+            sexes = sexes.cuda(non_blocking=True)
         batch_size = labels.shape[0]
-        features = model(images)
-        f1, f2 = torch.split(features, [batch_size, batch_size], dim=0)
-        features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
-        loss = criterion(features, labels)
+        out = model(images, sexes)
+        loss = criterion(out, labels)
         losses.update(loss.item(), batch_size)
+        acces.update(accuracy(out, labels), batch_size)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if (i + 1) % opt.print_freq == 0:
             print('Train: [{0}][{1}/{2}]\t'
-                  'loss: {loss.val:.3f} loss_avg:({loss.avg:.3f})'.format(epoch, i + 1, len(train_loader), loss=losses))
+                  'loss: {loss.val:.3f} \tloss_avg:({loss.avg:.3f}) \t'
+                  'acc: {acc.val:.3f} \tacc_avg:({acc.avg:.3f}) \t'.format(epoch, i + 1, len(train_loader), loss=losses,
+                                                                           acc=acces))
             sys.stdout.flush()
 
     # for name, parms in model.named_parameters():
     #     print('-->name:', name, '-->grad_requirs:', parms.requires_grad, '--weight', torch.mean(parms.data),
     #           ' -->grad_value:', torch.mean(parms.grad))
 
-    return losses.avg
+    return losses.avg, acces.avg
 
 
 def validate(val_loader, model, criterion, epoch, opt):
     model.eval()
     losses = AverageMeter()
+    acces = AverageMeter()
 
     with torch.no_grad():
-        for i, (images, labels) in enumerate(val_loader):
-            images = torch.cat([images[0], images[1]], dim=0)
+        for i, (images, labels, sexes) in enumerate(val_loader):
             if torch.cuda.is_available():
                 images = images.cuda(non_blocking=True)
                 labels = labels.cuda(non_blocking=True)
+                sexes = sexes.cuda(non_blocking=True)
             batch_size = labels.shape[0]
-            features = model(images)
-            f1, f2 = torch.split(features, [batch_size, batch_size], dim=0)
-            features = torch.cat([f1.unsqueeze(1), f2.unsqueeze(1)], dim=1)
-            loss = criterion(features, labels)
+            out = model(images, sexes)
+            loss = criterion(out, labels)
             losses.update(loss.item(), batch_size)
+            acces.update(accuracy(out, labels), batch_size)
 
             if (i + 1) % opt.print_freq == 0:
                 print('Train: [{0}][{1}/{2}]\t'
-                      'val_loss: {loss.val:.3f} val_loss_avg:({loss.avg:.3f})'.format(epoch, i + 1, len(val_loader),
-                                                                                      loss=losses))
+                      'val_loss: {loss.val:.3f} \tval_loss_avg:({loss.avg:.3f}) \t'
+                      'val_acc: {acc.val:.3f} \tval_acc_avg:({acc.avg:.3f}) \t'.format(epoch, i + 1, len(val_loader),
+                                                                                       loss=losses, acc=acces))
                 sys.stdout.flush()
 
-    return losses.avg
+    return losses.avg, acces.avg
 
 
 def parser_opt():
@@ -221,23 +221,21 @@ def parser_opt():
     parser.add_argument('--std', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
     parser.add_argument('--size', type=int, default=400)
 
-    parser.add_argument('--print_freq', type=int, default=1)
+    parser.add_argument('--print_freq', type=int, default=10)
     parser.add_argument('--save_freq', type=int, default=10)
-    parser.add_argument('--epochs', type=int, default=300)
-    parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--workers', type=int, default=14)
+    parser.add_argument('--epochs', type=int, default=200)
+    parser.add_argument('--batch_size', type=int, default=16)
+    parser.add_argument('--workers', type=int, default=8)
 
-    parser.add_argument('--learning_rate', type=float, default=0.1)
+    parser.add_argument('--learning_rate', type=float, default=0.0001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
     parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--momentum', type=float, default=0.9)
-    parser.add_argument('--temp', type=float, default=2.0)
-    parser.add_argument('--base_temp', type=float, default=2.0)
 
     opt = parser.parse_args()
 
     train_name = datetime.now(tz=pytz.timezone('Asia/Shanghai')).strftime("%Y%m%d_%H%M%S")
-    train_name = train_name + "SuperCREncoder"
+    train_name = train_name + "Liner"
     train_dir = os.path.join(opt.save_path, train_name)
     if not os.path.exists(train_dir):
         os.makedirs(train_dir)
@@ -251,23 +249,25 @@ if __name__ == '__main__':
 
     opt = parser_opt()
     train_loader, val_loader = set_data_loader(opt)
-    model, criterion = set_model(opt)
+    model, criterion = set_model()
     optimizer = set_optimizer(opt, model)
     logger = tensorboard_logger.Logger(logdir=opt.tb_path, flush_secs=2)
 
-    min_loss = 50
+    min_acc = 50
     for epoch in range(1, opt.epochs + 1):
         adjust_learning_rate(opt, optimizer, epoch)
 
-        loss = train(train_loader, model, criterion, optimizer, epoch, opt)
+        loss, acc = train(train_loader, model, criterion, optimizer, epoch, opt)
         logger.log_value('learning_rate', optimizer.param_groups[0]['lr'], epoch)
         logger.log_value('train_loss', loss, epoch)
+        logger.log_value('train_acc', acc, epoch)
 
-        loss = validate(val_loader, model, criterion, epoch, opt)
+        loss, acc = validate(val_loader, model, criterion, epoch, opt)
         logger.log_value('val_loss', loss, epoch)
+        logger.log_value('val_acc', acc, epoch)
 
-        if loss < min_loss:
-            min_loss = loss
+        if min_acc > acc:
+            min_acc = acc
             save_file = os.path.join(opt.model_path, 'best.pth'.format(epoch=epoch))
             save_model(model, optimizer, opt, epoch, save_file)
 

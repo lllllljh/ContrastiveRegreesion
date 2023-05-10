@@ -15,7 +15,8 @@ from torch.backends import cudnn
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
-from network.Resnet import CR, Regression
+from network.ResNet18 import ResNet18
+from network.Regression import Regression
 
 
 class AverageMeter(object):
@@ -126,7 +127,7 @@ class MyDataset3(Dataset):
 
 
 def set_model(opt):
-    model = CR()
+    model = ResNet18()
     ckpt = torch.load(opt.weight, map_location='cpu')
     model_state_dict = ckpt['model']
     model.load_state_dict(model_state_dict)
@@ -147,7 +148,7 @@ def set_data_loader(opt):
     normalize2 = transforms.Normalize(mean=eval(opt.mean2), std=eval(opt.std2))
 
     train_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
@@ -157,13 +158,13 @@ def set_data_loader(opt):
     ])
 
     val_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.ToTensor(),
         normalize1
     ])
 
     unlabelled_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
@@ -205,7 +206,7 @@ def set_pseudo_loader(opt, pseudo_labels, count):
     unlabelled_info_path = os.path.join(opt.dataset_path, 'unlabelled.csv')
     normalize = transforms.Normalize(mean=eval(opt.mean2), std=eval(opt.std2))
     pseudo_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
@@ -322,6 +323,7 @@ def train(train_loader, unlabelled_loader, model, regression, criterion, optimiz
     pseudo_labels = pseudo_labels.cpu().numpy()
     pseudo_loader = set_pseudo_loader(opt, pseudo_labels, count)
 
+    regression.train()
     for i, (images, sexes, labels) in enumerate(pseudo_loader):
         if torch.cuda.is_available():
             images = images.cuda(non_blocking=True)
@@ -382,30 +384,30 @@ def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
-    parser.add_argument('--weight', type=str, default='./weight/SuperCR.pth')
+    parser.add_argument('--weight', type=str, default='./weight/best.pth')
     parser.add_argument('--mean1', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std1', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
     parser.add_argument('--mean2', type=str, default='(0.60336735,0.60336735,0.60336735)')
     parser.add_argument('--std2', type=str, default='(0.1685622,0.1685622,0.1685622)')
-    parser.add_argument('--size', type=int, default=256)
+    parser.add_argument('--size', type=int, default=400)
 
     parser.add_argument('--print_freq', type=int, default=1)
     parser.add_argument('--save_freq', type=int, default=10)
     parser.add_argument('--epochs', type=int, default=200)
     parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--workers', type=int, default=12)
     parser.add_argument('--threshold', type=float, default=1)
     parser.add_argument('--drop_iterations', type=int, default=5)
 
     parser.add_argument('--learning_rate', type=float, default=0.001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=1e-3)
+    parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--momentum', type=float, default=0.9)
 
     opt = parser.parse_args()
 
     train_name = datetime.now(tz=pytz.timezone('Asia/Shanghai')).strftime("%Y%m%d_%H%M%S")
-    train_name = train_name + "PseudoPredictor"
+    train_name = train_name + "SemiPredictor"
     train_dir = os.path.join(opt.save_path, train_name)
     if not os.path.exists(train_dir):
         os.makedirs(train_dir)
@@ -423,6 +425,7 @@ if __name__ == '__main__':
     optimizer = set_optimizer(opt, regression)
     logger = tensorboard_logger.Logger(logdir=opt.tb_path, flush_secs=2)
 
+    min_acc = 50
     for epoch in range(1, opt.epochs + 1):
         adjust_learning_rate(opt, optimizer, epoch)
 
@@ -439,8 +442,9 @@ if __name__ == '__main__':
         logger.log_value('val_loss', loss, epoch)
         logger.log_value('val_acc', acc, epoch)
 
-        if epoch % opt.save_freq == 0:
-            save_file = os.path.join(opt.model_path, 'epoch_{epoch}.pth'.format(epoch=epoch))
+        if min_acc > acc:
+            min_acc = acc
+            save_file = os.path.join(opt.model_path, 'best.pth'.format(epoch=epoch))
             save_model(model, regression, optimizer, opt, epoch, save_file)
 
     save_file = os.path.join(opt.model_path, 'last.pth')

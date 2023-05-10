@@ -11,7 +11,8 @@ from torch.backends import cudnn
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
-from network.Resnet import CR, Regression
+from network.ResNet18 import ResNet18
+from network.Regression import Regression
 
 
 class AverageMeter(object):
@@ -62,7 +63,7 @@ class MyDataset(Dataset):
 
 
 def set_model(opt):
-    model = CR()
+    model = ResNet18()
     regression = Regression()
     ckpt = torch.load(opt.weight, map_location='cpu')
     model_state_dict = ckpt['model']
@@ -82,13 +83,13 @@ def set_data_loader(opt):
     normalize = transforms.Normalize(mean=eval(opt.mean), std=eval(opt.std))
 
     test_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.ToTensor(),
         normalize
     ])
 
     test_data_path = os.path.join(opt.dataset_path, 'test')
-    test_info_path = os.path.join(opt.dataset_path, 'test.csv')
+    test_info_path = os.path.join(opt.dataset_path, 'boneage_test.csv')
 
     test_dataset = MyDataset(
         data_dir=test_data_path, info_csv=test_info_path, transform=test_transform
@@ -135,14 +136,13 @@ def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
-    parser.add_argument('--weight', type=str, default='./weight/epoch_160.pth')
+    parser.add_argument('--weight', type=str, default='./weight/b.pth')
     parser.add_argument('--mean', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
-    parser.add_argument('--size', type=int, default=256)
 
     parser.add_argument('--batch_size', type=int, default=1)
     parser.add_argument('--test_num', type=int, default=500)
-    parser.add_argument('--workers', type=int, default=4)
+    parser.add_argument('--workers', type=int, default=8)
 
     opt = parser.parse_args()
 

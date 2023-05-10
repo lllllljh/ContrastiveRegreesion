@@ -15,7 +15,8 @@ from torch.backends import cudnn
 from torch.utils.data import Dataset
 from torchvision import transforms
 from datetime import datetime
-from network.Resnet import CR, Regression
+from network.Regression import Regression
+from network.ResNet18 import ResNet18
 
 
 class AverageMeter(object):
@@ -67,7 +68,7 @@ class MyDataset(Dataset):
 
 def set_model(opt):
 
-    model = CR()
+    model = ResNet18()
     ckpt = torch.load(opt.weight, map_location='cpu')
     model_state_dict = ckpt['model']
     model.load_state_dict(model_state_dict)
@@ -88,7 +89,7 @@ def set_data_loader(opt):
     normalize = transforms.Normalize(mean=eval(opt.mean), std=eval(opt.std))
 
     train_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.RandomResizedCrop(size=opt.size, scale=(0.2, 1.)),
         transforms.RandomHorizontalFlip(),
         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
@@ -98,7 +99,7 @@ def set_data_loader(opt):
     ])
 
     val_transform = transforms.Compose([
-        transforms.Resize((300, 400)),
+        transforms.Resize((400, 400)),
         transforms.ToTensor(),
         normalize
     ])
@@ -226,26 +227,26 @@ def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
-    parser.add_argument('--weight', type=str, default='./weight/epoch_140.pth')
+    parser.add_argument('--weight', type=str, default='./weight/SupConbest.pth')
     parser.add_argument('--mean', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
-    parser.add_argument('--size', type=int, default=256)
+    parser.add_argument('--size', type=int, default=400)
 
     parser.add_argument('--print_freq', type=int, default=1)
     parser.add_argument('--save_freq', type=int, default=10)
     parser.add_argument('--epochs', type=int, default=200)
-    parser.add_argument('--batch_size', type=int, default=128)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--workers', type=int, default=8)
 
-    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--learning_rate', type=float, default=0.0001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=1e-3)
+    parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--momentum', type=float, default=0.9)
 
     opt = parser.parse_args()
 
     train_name = datetime.now(tz=pytz.timezone('Asia/Shanghai')).strftime("%Y%m%d_%H%M%S")
-    train_name = train_name + "Predictor"
+    train_name = train_name + "SupPredictor"
     train_dir = os.path.join(opt.save_path, train_name)
     if not os.path.exists(train_dir):
         os.makedirs(train_dir)
@@ -263,6 +264,7 @@ if __name__ == '__main__':
     optimizer = set_optimizer(opt, regression)
     logger = tensorboard_logger.Logger(logdir=opt.tb_path, flush_secs=2)
 
+    min_acc = 50
     for epoch in range(1, opt.epochs + 1):
         adjust_learning_rate(opt, optimizer, epoch)
 
@@ -277,8 +279,9 @@ if __name__ == '__main__':
         logger.log_value('val_loss', loss, epoch)
         logger.log_value('val_acc', acc, epoch)
 
-        if epoch % opt.save_freq == 0:
-            save_file = os.path.join(opt.model_path, 'epoch_{epoch}.pth'.format(epoch=epoch))
+        if min_acc > acc:
+            min_acc = acc
+            save_file = os.path.join(opt.model_path, 'best.pth'.format(epoch=epoch))
             save_model(model, regression, optimizer, opt, epoch, save_file)
 
     save_file = os.path.join(opt.model_path, 'last.pth')
