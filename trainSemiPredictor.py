@@ -384,7 +384,7 @@ def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
-    parser.add_argument('--weight', type=str, default='./weight/best.pth')
+    parser.add_argument('--weight', type=str, default='./weight/EncoderBest.pth')
     parser.add_argument('--mean1', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std1', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
     parser.add_argument('--mean2', type=str, default='(0.60336735,0.60336735,0.60336735)')
