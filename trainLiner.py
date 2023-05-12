@@ -229,7 +229,7 @@ def parser_opt():
 
     parser.add_argument('--learning_rate', type=float, default=0.0001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=1e-4)
+    parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--momentum', type=float, default=0.9)
 
     opt = parser.parse_args()

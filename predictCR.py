@@ -136,7 +136,7 @@ def parser_opt():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_path', type=str, default='./dataset')
     parser.add_argument('--save_path', type=str, default='./output')
-    parser.add_argument('--weight', type=str, default='./weight/SemiPredictorBest.pth')
+    parser.add_argument('--weight', type=str, default='./weight/SupPredictorBest.pth')
     parser.add_argument('--mean', type=str, default='(0.115339115, 0.115339115, 0.115339115)')
     parser.add_argument('--std', type=str, default='(0.18438558, 0.18438558, 0.18438558)')
 

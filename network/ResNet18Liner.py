@@ -16,7 +16,7 @@ class ResNet18Liner(nn.Module):
         self.linear2 = nn.Linear(self.input_size, self.output_size)
         self.linear3 = nn.Linear(self.sex_input_size, self.sex_output_size)
         self.relu = nn.ReLU(inplace=True)
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=0.4)
 
     def forward(self, x, sex):
         x = self.model(x)
