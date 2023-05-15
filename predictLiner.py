@@ -96,14 +96,11 @@ def set_data_loader(opt):
     return test_loader
 
 
-def accuracy(output, labels):
-    mae = torch.abs(output - labels)
-    return mae.mean()
-
-
 def test(test_loader, model, log):
     model.eval()
     acces = AverageMeter()
+    mses = AverageMeter()
+    mapes = AverageMeter()
     with torch.no_grad():
         for i, (images, labels, sexes, names) in enumerate(test_loader):
             if torch.cuda.is_available():
@@ -112,7 +109,11 @@ def test(test_loader, model, log):
                 labels = labels.cuda(non_blocking=True)
             out = model(images, sexes)
             acc = abs(labels[0].item() - out[0].item())
+            mse = (labels[0].item() - out[0].item()) * (labels[0].item() - out[0].item())
+            mape = acc / labels[0].item()
             acces.update(acc, 1)
+            mses.update(mse, 1)
+            mapes.update(mape, 1)
             print('Name:{0}\tTrueBoneAge:{1:.3f}\tPredictBoneAge:{2:.3f}\tAbsoluteError(month):{3:.3f}'.format(
                 names[0],
                 labels[0].item(),
@@ -122,7 +123,7 @@ def test(test_loader, model, log):
                 labels[0].item(),
                 out[0].item(), acc), file=log)
 
-    return acces.sum
+    return acces.sum, mses.sum, mapes.sum
 
 
 def parser_opt():
@@ -157,7 +158,12 @@ if __name__ == '__main__':
     test_loader = set_data_loader(opt)
     model = set_model(opt)
     log = open(opt.log_path, mode='a+')
-    sum = test(test_loader, model, log)
+    sum, mse_sum, mape_sum = test(test_loader, model, log)
     print('Mean of Absolute Error:{0}'.format(sum * 1.0 / opt.test_num))
     print('Mean of Absolute Error:{0}'.format(sum * 1.0 / opt.test_num), file=log)
+    print('Mean of Square Error:{0}'.format(mse_sum * 1.0 / opt.test_num))
+    print('Mean of Square Error:{0}'.format(mse_sum * 1.0 / opt.test_num), file=log)
+    print('Mean Absolute Percentage Error:{0}'.format(mape_sum * 1.0 / opt.test_num))
+    print('Mean Absolute Percentage Error:{0}'.format(mape_sum * 1.0 / opt.test_num), file=log)
+
     log.close()

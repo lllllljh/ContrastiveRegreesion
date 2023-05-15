@@ -394,20 +394,19 @@ def parser_opt():
     parser.add_argument('--print_freq', type=int, default=1)
     parser.add_argument('--save_freq', type=int, default=10)
     parser.add_argument('--epochs', type=int, default=200)
-    parser.add_argument('--batch_size', type=int, default=128)
-    parser.add_argument('--workers', type=int, default=12)
-    parser.add_argument('--threshold', type=float, default=1)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--workers', type=int, default=8)
+    parser.add_argument('--threshold', type=float, default=4)
     parser.add_argument('--drop_iterations', type=int, default=5)
-
-    parser.add_argument('--learning_rate', type=float, default=0.001)
+    parser.add_argument('--learning_rate', type=float, default=0.0001)
     parser.add_argument('--lr_decay_rate', type=float, default=0.1)
-    parser.add_argument('--weight_decay', type=float, default=0)
+    parser.add_argument('--weight_decay', type=float, default=1e-4)
     parser.add_argument('--momentum', type=float, default=0.9)
 
     opt = parser.parse_args()
 
     train_name = datetime.now(tz=pytz.timezone('Asia/Shanghai')).strftime("%Y%m%d_%H%M%S")
-    train_name = train_name + "SemiPredictor"
+    train_name = train_name + "PseudoPredictor"
     train_dir = os.path.join(opt.save_path, train_name)
     if not os.path.exists(train_dir):
         os.makedirs(train_dir)
